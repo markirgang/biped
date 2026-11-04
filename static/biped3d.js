@@ -18,7 +18,7 @@ class Biped3DRenderer {
             1,
             6000
         );
-        this.camera.position.set(420, 360, 620);
+        this.camera.position.set(620, 500, 900);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
@@ -31,7 +31,7 @@ class Biped3DRenderer {
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.06;
         this.controls.maxPolarAngle = Math.PI / 2 + 0.08;
-        this.controls.target.set(0, 170, 0);
+        this.controls.target.set(0, 280, 0);
 
         this.mouthEnergized = false;
         this.neckPulsating = false;
@@ -398,8 +398,8 @@ class Biped3DRenderer {
     }
 
     resetCamera() {
-        this.camera.position.set(420, 360, 620);
-        this.controls.target.set(0, 170, 0);
+        this.camera.position.set(620, 500, 900);
+        this.controls.target.set(0, 280, 0);
         this.controls.update();
     }
 
