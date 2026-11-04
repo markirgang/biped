@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+server.log
+static/audio/*
+!static/audio/.gitkeep
+cert.pem
+key.pem

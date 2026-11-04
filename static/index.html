@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biped 17-DOF Humanoid Control Center</title>
+    <link rel="stylesheet" href="style.css?v=100">
+    <script src="lib/three.min.js"></script>
+    <script src="lib/OrbitControls.js"></script>
+    <script src="lib/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+    <header class="app-header">
+        <div class="logo-container">
+            <div class="logo-icon">17</div>
+            <div class="app-title">BIPED CONTROL CENTER</div>
+        </div>
+
+        <nav class="top-nav-tabs">
+            <button class="nav-tab-btn active" data-view="viewAnimation">🎮 3D Control</button>
+            <button class="nav-tab-btn" data-view="viewSettings">⚙️ Settings &amp; HW</button>
+            <button class="nav-tab-btn" data-view="viewCalibration">🔧 Servo Calibration</button>
+            <button class="nav-tab-btn" data-view="viewWiring">🔌 Wiring Schematic</button>
+            <button class="nav-tab-btn" data-view="viewInstructions">📖 Guide &amp; Instructions</button>
+        </nav>
+
+        <div class="header-status">
+            <div class="status-badge">
+                <span class="status-dot"></span>
+                <span id="statusText">ONLINE</span>
+            </div>
+            <button class="btn-preset primary" id="btnExportScript">Export Python Code</button>
+        </div>
+    </header>
+
+    <!-- VIEW 1: 3D ANIMATION & REALTIME CONTROL -->
+    <div class="view-screen active" id="viewAnimation">
+        <aside class="panel left">
+            <div class="panel-section">
+                <div class="section-title">Locomotion Mode</div>
+                <div class="tab-selector" id="gaitTabs">
+                    <button class="tab-btn active" data-gait="walk">Walk</button>
+                    <button class="tab-btn" data-gait="march">March</button>
+                    <button class="tab-btn" data-gait="turn">Turn</button>
+                    <button class="tab-btn" data-gait="run">⚡ Run</button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">Body Attitude &amp; Pose</div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Height Offset</span><span class="slider-val" id="valHeight">0 mm</span></div>
+                    <input type="range" id="slideHeight" min="-60" max="60" value="0">
+                </div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Pitch Angle</span><span class="slider-val" id="valPitch">0°</span></div>
+                    <input type="range" id="slidePitch" min="-30" max="30" value="0">
+                </div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Roll Angle</span><span class="slider-val" id="valRoll">0°</span></div>
+                    <input type="range" id="slideRoll" min="-30" max="30" value="0">
+                </div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Yaw Rotation</span><span class="slider-val" id="valYaw">0°</span></div>
+                    <input type="range" id="slideYaw" min="-45" max="45" value="0">
+                </div>
+                <button class="btn-preset" id="btnResetAttitude" style="width:100%; margin-top:4px;">Reset Body Pose</button>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">Step Geometry</div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Step Lift Height</span><span class="slider-val" id="valStepHeight">35 mm</span></div>
+                    <input type="range" id="slideStepHeight" min="10" max="70" value="35">
+                </div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Stride Length</span><span class="slider-val" id="valStepLen">60 mm</span></div>
+                    <input type="range" id="slideStepLen" min="20" max="100" value="60">
+                </div>
+            </div>
+        </aside>
+
+        <main class="viewport-container">
+            <div id="viewport3d"></div>
+            <div class="viewport-toolbar">
+                <button class="tool-btn" id="btnResetCam">📷 Reset Camera</button>
+            </div>
+
+            <div class="dpad-overlay">
+                <div></div>
+                <button class="btn-dpad" id="btnFwd" title="Forward (W)">▲</button>
+                <div></div>
+                <button class="btn-dpad" id="btnLeft" title="Strafe Left (A)">◄</button>
+                <button class="btn-dpad" id="btnStop" title="Stop (Space)">■</button>
+                <button class="btn-dpad" id="btnRight" title="Strafe Right (D)">►</button>
+                <button class="btn-dpad" id="btnTurnL" title="Turn Left (Q)">↺</button>
+                <button class="btn-dpad" id="btnBwd" title="Backward (S)">▼</button>
+                <button class="btn-dpad" id="btnTurnR" title="Turn Right (E)">↻</button>
+            </div>
+        </main>
+
+        <aside class="panel right">
+            <div class="panel-section" id="geminiAiPanel">
+                <div class="section-title">
+                    <span>🤖 Gemini AI Multimodal Agent</span>
+                    <button class="tool-btn" id="btnApiKeySettings" style="padding:2px 6px;">🔑 Key</button>
+                </div>
+
+                <div id="apiKeyBox" style="display:none; margin-bottom:10px;">
+                    <input type="password" id="inputApiKey" placeholder="Enter Gemini API Key..." value=""
+                           style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--panel-border); background:#0f172a; color:#fff; font-size:0.8rem;">
+                    <button class="btn-preset primary" id="btnSaveApiKey" style="width:100%; margin-top:6px;">Save Key</button>
+                </div>
+
+                <div style="position:relative; width:100%; height:130px; background:#000; border-radius:8px; overflow:hidden; margin-bottom:8px; border:1px solid var(--panel-border);">
+                    <img id="camFeed" src="/api/camera/frame" alt="Biped Camera Feed" style="width:100%; height:100%; object-fit:cover;">
+                    <div id="gestureBadge" style="position:absolute; bottom:6px; left:6px; background:rgba(0,0,0,0.7); color:var(--accent-cyan); font-size:0.7rem; padding:3px 8px; border-radius:4px; border:1px solid var(--accent-cyan);">
+                        Gesture: Idle
+                    </div>
+                </div>
+
+                <div id="chatHistory" style="height:120px; overflow-y:auto; background:rgba(15,23,42,0.8); border-radius:8px; padding:8px; border:1px solid rgba(255,255,255,0.05); margin-bottom:8px; font-size:0.78rem; display:flex; flex-direction:column; gap:6px;">
+                    <div class="msg ai"><strong>Gemini AI:</strong> Hello! Speak or type a command. Try "wave your right hand" or "walk forward".</div>
+                </div>
+
+                <div style="background:rgba(15,23,42,0.9); padding:8px; border-radius:8px; border:1px solid var(--panel-border); margin-bottom:8px;">
+                    <div style="font-size:0.72rem; color:var(--accent-cyan); font-weight:bold; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
+                        <span>🎙️ LIVE MIC SOUND INDICATOR</span>
+                        <span id="vuVal" style="color:var(--accent-green); font-family:monospace; font-size:0.8rem;">0%</span>
+                    </div>
+                    <div style="background:#0f172a; height:12px; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); margin-bottom:6px;">
+                        <div id="micVuBar" style="width:0%; height:100%; background:linear-gradient(90deg, var(--accent-cyan), var(--accent-green), var(--accent-orange), var(--accent-red)); transition:width 0.04s linear;"></div>
+                    </div>
+                    <div class="slider-control" style="margin-bottom:4px;">
+                        <div class="slider-label" style="font-size:0.68rem; margin-bottom:2px;">
+                            <span>🎚️ Microphone Gain</span>
+                            <span class="slider-val" id="valMicSensitivity" style="color:var(--accent-cyan); font-size:0.75rem;">100%</span>
+                        </div>
+                        <input type="range" id="slideMicSensitivity" min="10" max="300" value="100" style="width:100%;">
+                    </div>
+                    <div id="micStatusText" style="font-size:0.68rem; color:var(--text-muted); margin-top:2px;">
+                        Status: Click "Activate Mic" to start listening.
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:6px; margin-bottom:6px;">
+                    <input type="text" id="chatInput" placeholder="Ask Gemini something..." style="flex:1; padding:8px; border-radius:6px; border:1px solid var(--panel-border); background:#0f172a; color:#fff; font-size:0.8rem;">
+                    <button class="btn-preset primary" id="btnSendChat">Send</button>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                    <button class="btn-preset" id="btnMic" style="background:linear-gradient(135deg, rgba(16,185,129,0.25), rgba(0,240,255,0.25)); border-color:var(--accent-green); font-weight:bold;">🎙️ Activate Mic</button>
+                    <button class="btn-preset" id="btnAskVision">👁️ Describe Scene</button>
+                </div>
+            </div>
+
+            <div class="panel-section" id="mp3StudioPanel">
+                <div class="section-title">
+                    <span>🎵 MP3 Music Player &amp; Dance Sync</span>
+                    <span style="font-size:0.7rem; color:var(--accent-orange);">AUDIO SUBFOLDER</span>
+                </div>
+
+                <input type="file" id="mp3FileInput" accept=".mp3,audio/mpeg,audio/*" style="display:none;">
+                <button class="btn-preset primary" id="btnUploadMp3" style="width:100%; margin-bottom:8px; background:linear-gradient(135deg, rgba(245,158,11,0.35), rgba(236,72,153,0.35)); border-color:var(--accent-orange); font-weight:bold; font-size:0.82rem; padding:8px;">📁 Import MP3 to static/audio/</button>
+
+                <div style="margin-bottom:6px;">
+                    <label class="form-label" style="font-size:0.72rem; margin-bottom:2px;">Select Imported MP3 Song:</label>
+                    <select id="selectMp3Song" class="form-select" style="width:100%; font-size:0.8rem; padding:6px;">
+                        <option value="">Loading MP3 files...</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom:8px;">
+                    <label class="form-label" style="font-size:0.72rem; margin-bottom:2px;">Associated Dance Routine:</label>
+                    <select id="selectMusicDance" class="form-select" style="width:100%; font-size:0.8rem; padding:6px;">
+                        <option value="Dance" selected>💃 Biped Dance</option>
+                        <option value="Wave Right Hand">👋 Wave Right Hand</option>
+                        <option value="Wave Left Hand">👋 Wave Left Hand</option>
+                        <option value="Both Arms Up">🙌 Both Arms Up</option>
+                        <option value="Walk in Place">🚶 Walk in Place</option>
+                        <option value="T-Pose">🅃 T-Pose</option>
+                    </select>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:6px;">
+                    <button class="btn-preset" id="btnPlayMusic" style="background:var(--accent-green); color:#000; font-weight:bold;">▶️ Play</button>
+                    <button class="btn-preset" id="btnPauseMusic" style="background:var(--accent-orange); color:#000; font-weight:bold;">⏸️ Pause</button>
+                    <button class="btn-preset" id="btnStopMusic" style="background:var(--accent-red); color:#fff; font-weight:bold;">⏹️ Stop</button>
+                </div>
+
+                <div style="font-size:0.7rem; color:var(--accent-cyan); font-weight:bold; margin-bottom:4px; display:flex; justify-content:space-between;">
+                    <span id="musicTrackName" style="max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Track: None</span>
+                    <span id="musicTimeVal">0:00 / 0:00</span>
+                </div>
+                <input type="range" id="slideMusicProgress" min="0" max="100" value="0" style="width:100%; margin-bottom:6px;">
+
+                <div style="font-size:0.7rem; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
+                    <span>🔊 Volume:</span>
+                    <input type="range" id="slideMusicVolume" min="0" max="100" value="80" style="flex:1;">
+                    <span id="valMusicVolume" style="color:var(--accent-cyan);">80%</span>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">Preset Poses &amp; Movements</div>
+                <div class="btn-group" id="presetButtons">
+                    <button class="btn-preset primary" data-pose="Stand" style="grid-column:1 / -1; background:linear-gradient(135deg, rgba(0,240,255,0.35), rgba(16,185,129,0.35)); border-color:var(--accent-cyan); font-weight:bold;">🧍 Stand Neutral</button>
+                    <button class="btn-preset" data-pose="Wave Right Hand">👋 Wave Right</button>
+                    <button class="btn-preset" data-pose="Wave Left Hand">👋 Wave Left</button>
+                    <button class="btn-preset" data-pose="Both Arms Up">🙌 Both Arms Up</button>
+                    <button class="btn-preset" data-pose="T-Pose">🅃 T-Pose</button>
+                    <button class="btn-preset" data-pose="Dance">💃 Dance</button>
+                    <button class="btn-preset" data-pose="Walk in Place">🚶 Walk in Place</button>
+                    <button class="btn-preset" data-pose="Squat">🏋️ Squat</button>
+                    <button class="btn-preset" data-pose="Bow / Respect">🙇 Bow</button>
+                    <button class="btn-preset" data-pose="Sit / Park">🪑 Sit</button>
+                    <button class="btn-preset" data-pose="Sleep / Park">😴 Sleep</button>
+                    <button class="btn-preset" data-pose="Curious Tilt">🤔 Curious Tilt</button>
+                    <button class="btn-preset" data-pose="Greeting Wave">🖖 Greeting</button>
+                    <button class="btn-preset" data-pose="Low Stance">⬇️ Low Stance</button>
+                    <button class="btn-preset" data-pose="High Stance">⬆️ High Stance</button>
+                    <button class="btn-preset" data-pose="Attack / Guard">🥊 Attack / Guard</button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">
+                    <span>📡 4x HC-SR04 Distance Sensors</span>
+                    <span style="font-size:0.7rem; color:var(--accent-green);">ULTRASONIC</span>
+                </div>
+                <div class="telemetry-grid">
+                    <div class="leg-card">
+                        <div class="leg-title" style="color:var(--accent-cyan)">FRONT</div>
+                        <div class="joint-row"><span id="distFront" style="font-weight:bold; color:#fff;">85 cm</span></div>
+                    </div>
+                    <div class="leg-card">
+                        <div class="leg-title" style="color:var(--accent-cyan)">REAR</div>
+                        <div class="joint-row"><span id="distRear" style="font-weight:bold; color:#fff;">140 cm</span></div>
+                    </div>
+                    <div class="leg-card">
+                        <div class="leg-title" style="color:var(--accent-cyan)">LEFT</div>
+                        <div class="joint-row"><span id="distLeft" style="font-weight:bold; color:#fff;">70 cm</span></div>
+                    </div>
+                    <div class="leg-card">
+                        <div class="leg-title" style="color:var(--accent-cyan)">RIGHT</div>
+                        <div class="joint-row"><span id="distRight" style="font-weight:bold; color:#fff;">75 cm</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">
+                    <span>⚡ L298 Motor Driver State</span>
+                    <span style="font-size:0.7rem; color:var(--accent-purple)">DUAL H-BRIDGE</span>
+                </div>
+                <div class="joint-row"><span>Ch 1 (Mouth Motor):</span><span id="motorMouthStatus" style="color:var(--text-muted); font-weight:bold;">OFF</span></div>
+                <div class="joint-row"><span>Ch 2 (Pulsating Neck):</span><span id="motorNeckStatus" style="color:var(--text-muted); font-weight:bold;">OFF</span></div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:8px;">
+                    <button class="btn-preset" id="btnToggleMouth">Toggle Mouth</button>
+                    <button class="btn-preset" id="btnToggleNeck">Toggle Neck</button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">
+                    <span>17-Servo Joint Telemetry</span>
+                    <span style="font-size:0.7rem; color:var(--accent-cyan);" id="ikStatus">IK VALID</span>
+                </div>
+                <div class="telemetry-grid" id="telemetryGrid"></div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- VIEW 2: SETTINGS & HARDWARE CONFIGURATION -->
+    <div class="view-screen" id="viewSettings">
+        <div class="settings-card">
+            <div class="section-title">🔑 Google Gemini AI API Configuration</div>
+            <div class="form-group">
+                <label class="form-label">Gemini API Key</label>
+                <input type="password" id="settingsApiKey" class="form-input" value="">
+            </div>
+            <div class="form-group">
+                <label class="form-label">AI Model Selection</label>
+                <select id="selectModel" class="form-select">
+                    <option value="gemini-3.8-flash" selected>Gemini 3.8 Flash (Fast Multimodal)</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Advanced Reasoning)</option>
+                    <option value="gemini-flash-latest">Gemini Flash Latest</option>
+                </select>
+            </div>
+            <button class="btn-preset primary" id="btnSaveSettings">Save AI Settings</button>
+
+            <div class="section-title" style="margin-top:16px;">🤖 Autonomous Obstacle Avoidance</div>
+            <div class="toggle-switch-container">
+                <span class="toggle-label">Enable Ultrasonic Obstacle Avoidance</span>
+                <label class="switch">
+                    <input type="checkbox" id="switchObstacleAvoidance">
+                    <span class="slider-round"></span>
+                </label>
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">
+                When enabled, the biped reads its 4x HC-SR04 ultrasonic sensors and automatically stops or steers away from obstacles closer than 35 cm.
+            </div>
+
+            <div class="section-title" style="margin-top:16px;">🦿 Servo Bus Health</div>
+            <div class="joint-row"><span>Degrees of Freedom:</span><span style="color:var(--accent-cyan); font-weight:bold;">17</span></div>
+            <div class="joint-row"><span>PCA9685 #1 (0x40):</span><span style="color:var(--accent-cyan);">Head, waist, arms (9 servos)</span></div>
+            <div class="joint-row"><span>PCA9685 #2 (0x41):</span><span style="color:var(--accent-cyan);">Legs (8 servos)</span></div>
+            <div class="joint-row"><span>Hardware Bridge:</span><span id="hardwareStatus" style="color:var(--accent-orange); font-weight:bold;">SIMULATION</span></div>
+        </div>
+
+        <div class="settings-card">
+            <div class="section-title">🎥 Audio &amp; Video Hardware Peripherals</div>
+
+            <div class="form-group">
+                <label class="form-label">Camera Source</label>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <select id="selectCamera" class="form-select" style="flex:1;">
+                        <option value="usb" selected>eMeet Pixy USB Webcam (/dev/video0) [Default]</option>
+                        <option value="1">Secondary USB Camera (/dev/video1)</option>
+                        <option value="csi">Raspberry Pi CSI Camera (Picamera2 / OV5647)</option>
+                    </select>
+                    <button class="btn-preset primary" id="btnSwitchCamera" style="white-space:nowrap;">📷 Change Camera</button>
+                    <button class="btn-preset" id="btnDefaultEmeetPixy" style="white-space:nowrap;">Set eMeet Pixy</button>
+                </div>
+                <div id="cameraStatusMsg" style="margin-top:6px; font-size:0.75rem; color:var(--accent-green); font-weight:bold;">
+                    Active Camera: eMeet Pixy USB Webcam (/dev/video0)
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Microphone Input</label>
+                <select id="selectMic" class="form-select">
+                    <option value="browser" selected>🌐 Remote Computer / Browser Microphone</option>
+                    <option value="default">🎙️ Raspberry Pi Local Server Microphone</option>
+                    <option value="emeet_pixy">eMeet Pixy USB Microphone</option>
+                    <option value="usb_mic">USB Microphone (Generic)</option>
+                    <option value="bluetooth_mic">Bluetooth Headset Microphone</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Speaker Audio Output</label>
+                <select id="selectSpeaker" class="form-select">
+                    <option value="browser" selected>🌐 Remote Computer / Browser Audio</option>
+                    <option value="default">🔊 Raspberry Pi Local Server Speaker</option>
+                    <option value="bluetooth_speaker">Bluetooth Speaker (A2DP / HFP)</option>
+                    <option value="emeet_pixy_speaker">eMeet Pixy USB Speaker</option>
+                    <option value="usb_audio">USB Audio Output</option>
+                    <option value="hdmi_audio">Raspberry Pi HDMI Audio</option>
+                    <option value="audio_jack">3.5mm Analog Audio Jack</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">AI Voice Speech Synthesis (TTS)</label>
+                <select id="selectVoice" class="form-select">
+                    <option value="default">Loading System Voices...</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW 3: SERVO CALIBRATION WORKBENCH -->
+    <div class="view-screen" id="viewCalibration">
+        <div class="calib-top-section">
+            <div class="settings-card calib-3d-card">
+                <div class="section-title" style="margin:0; display:flex; justify-content:space-between; align-items:center;">
+                    <span>🎥 Live 3D Calibration Preview</span>
+                    <button class="tool-btn" id="btnResetCamCalib">📷 Reset Camera</button>
+                </div>
+                <div class="viewport-container calib-viewport-container">
+                    <div id="calibViewport3d" style="width:100%; height:100%;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-card calib-bottom-banner">
+            <div class="section-title">🧪 Gait &amp; Motion Test Commands &amp; Quick Stances</div>
+
+            <div class="calib-banner-controls">
+                <div class="calib-banner-group">
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label class="form-label">Test Gait Pattern</label>
+                        <select id="calibGaitSelect" class="form-select">
+                            <option value="walk">Walk Gait</option>
+                            <option value="march">March in Place</option>
+                            <option value="turn">Turn in Place</option>
+                            <option value="run">⚡ Run Gait</option>
+                        </select>
+                    </div>
+
+                    <div class="calib-btn-grid">
+                        <button class="btn-preset primary" id="btnTestGaitForward">Walk Forward</button>
+                        <button class="btn-preset" id="btnTestGaitStop" style="background:var(--accent-red); color:#fff; font-weight:bold;">Stop Motion</button>
+                        <button class="btn-preset" id="btnTestGaitTurnL">Turn Left</button>
+                        <button class="btn-preset" id="btnTestGaitTurnR">Turn Right</button>
+                    </div>
+                </div>
+
+                <div class="calib-banner-group">
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label class="form-label">Preset Stance / Motion Pose</label>
+                        <select id="calibPoseSelect" class="form-select">
+                            <option value="Stand" selected>Stand (Neutral)</option>
+                            <option value="T-Pose">T-Pose</option>
+                            <option value="Wave Right Hand">👋 Wave Right Hand</option>
+                            <option value="Wave Left Hand">👋 Wave Left Hand</option>
+                            <option value="Both Arms Up">🙌 Both Arms Up</option>
+                            <option value="Dance">💃 Dance</option>
+                            <option value="Walk in Place">🚶 Walk in Place</option>
+                            <option value="Squat">🏋️ Squat</option>
+                            <option value="Bow / Respect">🙇 Bow / Respect</option>
+                            <option value="Sit / Park">🪑 Sit / Park</option>
+                            <option value="Sleep / Park">😴 Sleep / Park</option>
+                            <option value="Curious Tilt">🤔 Curious Tilt</option>
+                            <option value="Greeting Wave">🖖 Greeting Wave</option>
+                            <option value="Low Stance">⬇️ Low Stance</option>
+                            <option value="High Stance">⬆️ High Stance</option>
+                            <option value="Attack / Guard">🥊 Attack / Guard</option>
+                        </select>
+                    </div>
+
+                    <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:4px; font-weight:bold; text-transform:uppercase;">Quick Stance Buttons</div>
+                    <div class="btn-group" id="calibQuickPoses" style="grid-template-columns: repeat(4, 1fr); gap:6px;">
+                        <button class="btn-preset primary" data-pose="Stand">Stand</button>
+                        <button class="btn-preset" data-pose="T-Pose">T-Pose</button>
+                        <button class="btn-preset" data-pose="Squat">Squat</button>
+                        <button class="btn-preset" data-pose="Bow / Respect">Bow</button>
+                        <button class="btn-preset" data-pose="Sit / Park">Sit</button>
+                        <button class="btn-preset" data-pose="Low Stance">Low</button>
+                        <button class="btn-preset" data-pose="High Stance">High</button>
+                        <button class="btn-preset" data-pose="Attack / Guard">Guard</button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top:16px; border-top:1px solid var(--panel-border); padding-top:16px;">
+                <div class="section-title" style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+                    <span>🔧 17-Servo Trim Angle Calibration &amp; Fine Tuning</span>
+                    <button class="btn-preset" id="btnResetCalibration">Reset All Trims</button>
+                </div>
+                <div class="calibration-grid" id="calibrationGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW 4: WIRING DIAGRAM & SCHEMATIC VIEW -->
+    <div class="view-screen" id="viewWiring">
+        <div class="wiring-container">
+            <div class="print-doc-header">
+                <div class="print-doc-logo">17</div>
+                <div>
+                    <h1 class="print-doc-title">BIPED 17-DOF HUMANOID ELECTRICAL SCHEMATIC</h1>
+                    <p class="print-doc-sub">Raspberry Pi 4/5 Core • Dual PCA9685 PWM (17 Servos) • L298N Motor Driver • 4x Ultrasonic Sensors • Power Management</p>
+                    <p class="print-doc-meta">Document Rev: 1.0 • System Bus: I2C (400kHz) • Servo Power: 5V 10A UBEC • Generated by Biped Control Center</p>
+                </div>
+            </div>
+
+            <div class="wiring-header-card">
+                <div class="wiring-header-title-box">
+                    <div class="wiring-header-icon">🔌</div>
+                    <div>
+                        <h2 class="wiring-title">Biped Electrical Wiring Diagram &amp; Pinout Schematic</h2>
+                        <p class="wiring-subtitle">
+                            Raspberry Pi 4/5 Core | Dual PCA9685 17x Servo Controllers | L298N Motor Driver | 4x HC-SR04 Ultrasonic Sensors
+                        </p>
+                        <div class="wiring-meta-badges">
+                            <span class="meta-badge">📋 Rev 1.0</span>
+                            <span class="meta-badge i2c">⚡ I2C Bus: 0x40 / 0x41</span>
+                            <span class="meta-badge pwr">🔋 5V 10A UBEC Bus</span>
+                            <span class="meta-badge gpio">🤖 17 Servo Channels</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="wiring-actions" style="display:flex; gap:10px; align-items:center;">
+                    <button class="btn-preset primary print-btn" id="btnExportWiringPDF">📄 Export Schematic to PDF</button>
+                    <button class="btn-preset print-btn" id="btnPrintWiringPDF" style="background:rgba(255,255,255,0.08); border:1px solid var(--panel-border); color:#fff;">🖨️ Quick Print</button>
+                </div>
+            </div>
+
+            <div class="wiring-overview-grid">
+                <div class="overview-box pwr-box">
+                    <div class="ob-icon">🔋</div>
+                    <div class="ob-content"><h4>Power Distribution</h4><p>2S/3S LiPo Battery ➔ 5V 10A UBEC Buck Regulator ➔ PCA9685 V+ Terminals &amp; Pi 5V Pins</p></div>
+                </div>
+                <div class="overview-box i2c-box">
+                    <div class="ob-icon">⚡</div>
+                    <div class="ob-content"><h4>I2C Communication Bus</h4><p>Pi GPIO 2 (SDA) &amp; GPIO 3 (SCL) ➔ Daisy-Chained PCA9685 Board 1 (0x40) &amp; Board 2 (0x41)</p></div>
+                </div>
+                <div class="overview-box motor-box">
+                    <div class="ob-icon">⚙️</div>
+                    <div class="ob-content"><h4>Motor Actuators Driver</h4><p>Pi GPIO 18, 23, 24 (Mouth Motor) &amp; GPIO 19, 25, 8 (Neck Motor) ➔ L298N Dual H-Bridge</p></div>
+                </div>
+                <div class="overview-box sensor-box">
+                    <div class="ob-icon">📡</div>
+                    <div class="ob-content"><h4>Ultrasonic Sensor Array</h4><p>4x HC-SR04 (Front, Rear, Left, Right) ➔ GPIO Triggers &amp; Voltage Divided Echo Inputs (3.3V)</p></div>
+                </div>
+            </div>
+
+            <div class="wiring-grid">
+                <div class="wiring-card full-width">
+                    <div class="wiring-card-header">
+                        <span class="wiring-badge pca">17 SERVO MAP</span>
+                        <h3>PCA9685 Servo Channel Allocation</h3>
+                    </div>
+                    <div class="wiring-table-wrapper">
+                        <table class="wiring-table">
+                            <thead>
+                                <tr><th>#</th><th>Joint</th><th>Board</th><th>Channel</th><th>Group</th><th>Logical Range</th></tr>
+                            </thead>
+                            <tbody id="servoMapTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="wiring-card">
+                    <div class="wiring-card-header">
+                        <span class="wiring-badge rpi">RASPBERRY PI GPIO</span>
+                        <h3>Raspberry Pi Master GPIO Pinout Map</h3>
+                    </div>
+                    <div class="wiring-table-wrapper">
+                        <table class="wiring-table">
+                            <thead><tr><th>GPIO / Pin</th><th>Signal</th><th>Connected Subsystem</th></tr></thead>
+                            <tbody>
+                                <tr><td><span class="pin-tag i2c">GPIO 2 (Pin 3)</span></td><td>SDA</td><td>PCA9685 #1 &amp; #2</td></tr>
+                                <tr><td><span class="pin-tag i2c">GPIO 3 (Pin 5)</span></td><td>SCL</td><td>PCA9685 #1 &amp; #2</td></tr>
+                                <tr><td><span class="pin-tag pwm">GPIO 18 (Pin 12)</span></td><td>L298_ENA</td><td>Mouth Motor PWM</td></tr>
+                                <tr><td><span class="pin-tag gpio">GPIO 23 (Pin 16)</span></td><td>L298_IN1</td><td>Mouth Direction A</td></tr>
+                                <tr><td><span class="pin-tag gpio">GPIO 24 (Pin 18)</span></td><td>L298_IN2</td><td>Mouth Direction B</td></tr>
+                                <tr><td><span class="pin-tag pwm">GPIO 19 (Pin 35)</span></td><td>L298_ENB</td><td>Neck Motor PWM</td></tr>
+                                <tr><td><span class="pin-tag gpio">GPIO 25 (Pin 22)</span></td><td>L298_IN3</td><td>Neck Direction A</td></tr>
+                                <tr><td><span class="pin-tag gpio">GPIO 8 (Pin 24)</span></td><td>L298_IN4</td><td>Neck Direction B</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="wiring-card">
+                    <div class="wiring-card-header">
+                        <span class="wiring-badge l298">HC-SR04 SENSORS</span>
+                        <h3>Ultrasonic Sensor Wiring</h3>
+                    </div>
+                    <div class="wiring-table-wrapper">
+                        <table class="wiring-table">
+                            <thead><tr><th>Sensor</th><th>Trig</th><th>Echo</th><th>Divider</th></tr></thead>
+                            <tbody>
+                                <tr><td>Front</td><td>GPIO 5</td><td>GPIO 6</td><td>1kΩ / 2kΩ</td></tr>
+                                <tr><td>Rear</td><td>GPIO 12</td><td>GPIO 13</td><td>1kΩ / 2kΩ</td></tr>
+                                <tr><td>Left</td><td>GPIO 16</td><td>GPIO 20</td><td>1kΩ / 2kΩ</td></tr>
+                                <tr><td>Right</td><td>GPIO 21</td><td>GPIO 26</td><td>1kΩ / 2kΩ</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="wiring-card full-width">
+                    <div class="wiring-card-header">
+                        <span class="wiring-badge power">POWER &amp; SAFETY</span>
+                        <h3>Power Distribution &amp; Safety Notes</h3>
+                    </div>
+                    <div style="padding:12px; color:var(--text-muted); font-size:0.82rem; line-height:1.7;">
+                        <p>• Use a separate 5V 10A UBEC for servo power. Never power 17 servos from the Raspberry Pi 5V rail.</p>
+                        <p>• Connect all grounds (Pi, PCA9685 boards, UBEC, L298N) to a common ground star point.</p>
+                        <p>• Keep servo signal wires away from the ultrasonic echo lines to reduce PWM noise.</p>
+                        <p>• Add a 1000µF electrolytic capacitor across the servo V+ / GND terminals to absorb current spikes.</p>
+                        <p>• HC-SR04 echo outputs are 5V: use a 1kΩ / 2kΩ divider before connecting to Pi GPIO.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW 5: GUIDE & INSTRUCTIONS -->
+    <div class="view-screen" id="viewInstructions">
+        <div class="guide-wrapper">
+            <div class="guide-header">
+                <div class="guide-title-box">
+                    <div class="guide-icon">📖</div>
+                    <div>
+                        <h2>Biped 17-DOF Operating Guide</h2>
+                        <p>Everything you need to power, calibrate, animate and control the biped humanoid.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="guide-grid">
+                <div class="guide-card">
+                    <div class="guide-card-header"><div class="guide-step">1</div><h3>Power &amp; Boot</h3></div>
+                    <ul class="guide-list">
+                        <li>Connect the 5V 10A UBEC to both PCA9685 V+ terminals.</li>
+                        <li>Connect the Pi, PCA9685 boards, L298N and UBEC to a common ground.</li>
+                        <li>Boot the Pi and open <code>http://localhost:2090</code> or <code>https://biped.shobots.party</code>.</li>
+                        <li>The Shobots menu can start and stop the biped server remotely.</li>
+                    </ul>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-card-header"><div class="guide-step">2</div><h3>17-DOF Layout</h3></div>
+                    <ul class="guide-list">
+                        <li><strong>Head:</strong> pan + tilt (2 servos).</li>
+                        <li><strong>Torso:</strong> waist yaw (1 servo).</li>
+                        <li><strong>Arms:</strong> shoulder pitch + roll + elbow (3 each).</li>
+                        <li><strong>Legs:</strong> hip yaw + hip pitch + knee + ankle (4 each).</li>
+                        <li>2 + 1 + 6 + 8 = <strong>17 servos</strong>.</li>
+                    </ul>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-card-header"><div class="guide-step">3</div><h3>Servo Calibration</h3></div>
+                    <ul class="guide-list">
+                        <li>Open the <strong>Servo Calibration</strong> tab.</li>
+                        <li>Use the trim slider for each of the 17 servos.</li>
+                        <li>Start with all trims at 0° and adjust only one joint at a time.</li>
+                        <li>Use the 3D preview and the test gait buttons to verify motion.</li>
+                        <li>Trims are applied to live motion and to exported Python code.</li>
+                    </ul>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-card-header"><div class="guide-step">4</div><h3>Walking &amp; Poses</h3></div>
+                    <ul class="guide-list">
+                        <li>Use the D-pad or WASD / arrow keys to walk, strafe and turn.</li>
+                        <li>Switch between Walk, March, Turn and Run modes.</li>
+                        <li>Click any preset pose to move all 17 joints instantly.</li>
+                        <li>Enable obstacle avoidance in Settings to react to the 4 ultrasonic sensors.</li>
+                    </ul>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-card-header"><div class="guide-step">5</div><h3>Gemini AI &amp; Voice</h3></div>
+                    <ul class="guide-list">
+                        <li>Add a Gemini API key in Settings or the AI panel.</li>
+                        <li>Type a command, describe the scene, or activate the microphone.</li>
+                        <li>Gemini can call <code>biped_walk</code>, <code>biped_pose</code> and <code>biped_stop</code>.</li>
+                        <li>Show 5 fingers to start walking, 2 fingers to wave, 1 finger for guard mode.</li>
+                    </ul>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-card-header"><div class="guide-step">6</div><h3>Music, TTS &amp; Export</h3></div>
+                    <ul class="guide-list">
+                        <li>Import MP3 files into <code>static/audio/</code> and play them from the browser or local speaker.</li>
+                        <li>Select a dance routine to sync the pose with the music.</li>
+                        <li>Text-to-speech is available through <code>/api/tts/speak</code>.</li>
+                        <li>Use <strong>Export Python Code</strong> to download a ready-to-run 17-servo script.</li>
+                    </ul>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-card-header"><div class="guide-step">7</div><h3>Network &amp; Shobots</h3></div>
+                    <ul class="guide-list">
+                        <li>Local server: <code>http://localhost:2090</code>.</li>
+                        <li>Public URL: <code>https://biped.shobots.party</code>.</li>
+                        <li>Shobots master menu: <code>https://shobots.party</code>.</li>
+                        <li>Server file: <code>/home/markirgang/biped/server.py</code>.</li>
+                    </ul>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-card-header"><div class="guide-step">8</div><h3>Troubleshooting</h3></div>
+                    <ul class="guide-list">
+                        <li>No camera? Check <code>/dev/video0</code> and the camera source selector.</li>
+                        <li>Servos jitter? Use a dedicated UBEC and common ground.</li>
+                        <li>Port busy? Restart from the Shobots menu or run <code>lsof -i:2090</code>.</li>
+                        <li>Logs: <code>server.log</code> in the project folder.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="audio_output.js"></script>
+    <script src="biped_kinematics.js"></script>
+    <script src="biped3d.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
