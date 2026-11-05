@@ -33,6 +33,15 @@
     let audioProgressTimer = null;
     let currentSong = null;
 
+    // Talking mouth robot (body-less animatronic on the stage front edge)
+    let mouthRobotTalking = false;
+    let mouthRobotDancing = false;
+    let mouthRobotStopTimer = null;
+    let speechAudioCtx = null;
+    let speechAnalyser = null;
+    let speechData = null;
+    let mouthRobotHardware = { mouth: false, neck: false };
+
     let micStream = null;
     let micContext = null;
     let micAnalyser = null;
@@ -97,6 +106,14 @@
 
         if (renderer) renderer.setPose(display, result.body);
         if (calibRenderer) calibRenderer.setPose(display, result.body);
+
+        const speechLevel = sampleSpeechLevel(now);
+        if (renderer) renderer.setSpeechLevel(speechLevel);
+        if (calibRenderer) calibRenderer.setSpeechLevel(speechLevel);
+        const levelFill = $('mouthRobotLevelFill');
+        if (levelFill) levelFill.style.width = Math.round(speechLevel * 100) + '%';
+        const levelText = $('mouthRobotLevelText');
+        if (levelText) levelText.textContent = Math.round(speechLevel * 100) + '%';
 
         if (now - lastTelemetry > 100) {
             lastTelemetry = now;
@@ -211,6 +228,8 @@
     function setPose(name) {
         activePose = name;
         moving = false;
+        mouthRobotDancing = /dance|groove|party/i.test(String(name || ''));
+        updateMouthRobotMode();
         const select = $('calibPoseSelect');
         if (select && select.value !== name) select.value = name;
         fetch('/api/pose', {
@@ -218,6 +237,140 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: name })
         }).catch(function () {});
+    }
+
+    // ---------------------------------------------------------------------
+    // Talking mouth robot sync (AI speech + dance)
+    // ---------------------------------------------------------------------
+    function updateMouthRobotMode() {
+        const mode = mouthRobotTalking ? 'talking' : (mouthRobotDancing ? 'dancing' : 'idle');
+        if (renderer) renderer.setAnimatronicState({ talking: mouthRobotTalking, dancing: mouthRobotDancing });
+        if (calibRenderer) calibRenderer.setAnimatronicState({ talking: mouthRobotTalking, dancing: mouthRobotDancing });
+        const badge = $('mouthRobotModeBadge');
+        if (badge) {
+            badge.textContent = mode.toUpperCase();
+            badge.style.color = mode === 'talking' ? 'var(--accent-cyan)' : (mode === 'dancing' ? 'var(--accent-orange)' : 'var(--text-muted)');
+        }
+        fetch('/api/animatronic/mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: mode })
+        }).catch(function () {});
+    }
+
+    function startMouthRobotTalking(estimateSeconds) {
+        mouthRobotTalking = true;
+        if (mouthRobotStopTimer) {
+            clearTimeout(mouthRobotStopTimer);
+            mouthRobotStopTimer = null;
+        }
+        if (estimateSeconds && estimateSeconds > 0) {
+            mouthRobotStopTimer = setTimeout(stopMouthRobotTalking, estimateSeconds * 1000);
+        }
+        updateMouthRobotMode();
+    }
+
+    function stopMouthRobotTalking() {
+        mouthRobotTalking = false;
+        if (mouthRobotStopTimer) {
+            clearTimeout(mouthRobotStopTimer);
+            mouthRobotStopTimer = null;
+        }
+        speechAnalyser = null;
+        speechData = null;
+        updateMouthRobotMode();
+    }
+
+    function ensureSpeechAnalyser(audio) {
+        try {
+            if (!speechAudioCtx) {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                if (!Ctx) return;
+                speechAudioCtx = new Ctx();
+            }
+            if (speechAudioCtx.state === 'suspended') speechAudioCtx.resume();
+            const source = speechAudioCtx.createMediaElementSource(audio);
+            speechAnalyser = speechAudioCtx.createAnalyser();
+            speechAnalyser.fftSize = 512;
+            speechAnalyser.smoothingTimeConstant = 0.55;
+            speechData = new Uint8Array(speechAnalyser.frequencyBinCount);
+            source.connect(speechAnalyser);
+            speechAnalyser.connect(speechAudioCtx.destination);
+        } catch (err) {
+            speechAnalyser = null;
+            speechData = null;
+        }
+    }
+
+    function sampleSpeechLevel(now) {
+        if (speechAnalyser && speechData) {
+            speechAnalyser.getByteTimeDomainData(speechData);
+            let sum = 0;
+            for (let i = 0; i < speechData.length; i++) {
+                const v = (speechData[i] - 128) / 128;
+                sum += v * v;
+            }
+            const rms = Math.sqrt(sum / speechData.length);
+            let level = Math.min(1, rms * 3.4);
+            if (mouthRobotTalking) {
+                // Keep a little motion during pauses or when the analyser is
+                // silent (blocked audio / no output device).
+                const s = now / 1000;
+                const fallback = 0.12 + Math.abs(Math.sin(s * 11.3) * Math.sin(s * 3.1)) * 0.35;
+                level = Math.max(level, fallback * 0.75);
+            }
+            return level;
+        }
+        if (mouthRobotTalking) {
+            // Fallback envelope when audio analysis is unavailable (local
+            // speaker output or a browser without Web Audio).
+            const s = now / 1000;
+            return 0.18 + Math.abs(Math.sin(s * 11.3) * Math.sin(s * 3.1)) * 0.42;
+        }
+        return 0;
+    }
+
+    function pollMouthRobot() {
+        fetch('/api/animatronic/state').then(function (r) { return r.json(); }).then(function (data) {
+            mouthRobotHardware = {
+                mouth: !!data.mouth_channel1,
+                neck: !!data.neck_channel2
+            };
+            if (renderer) renderer.setHardwareState(mouthRobotHardware.mouth, mouthRobotHardware.neck);
+            if (calibRenderer) calibRenderer.setHardwareState(mouthRobotHardware.mouth, mouthRobotHardware.neck);
+            const mouthEl = $('mouthRobotMouthStatus');
+            const neckEl = $('mouthRobotNeckStatus');
+            if (mouthEl) {
+                mouthEl.textContent = mouthRobotHardware.mouth ? 'ENERGIZED' : 'OFF';
+                mouthEl.style.color = mouthRobotHardware.mouth ? 'var(--accent-green)' : 'var(--text-muted)';
+            }
+            if (neckEl) {
+                neckEl.textContent = mouthRobotHardware.neck ? 'ENERGIZED' : 'OFF';
+                neckEl.style.color = mouthRobotHardware.neck ? 'var(--accent-green)' : 'var(--text-muted)';
+            }
+            const motorMouth = $('motorMouthStatus');
+            const motorNeck = $('motorNeckStatus');
+            if (motorMouth) {
+                motorMouth.textContent = mouthRobotHardware.mouth ? 'ON' : 'OFF';
+                motorMouth.style.color = mouthRobotHardware.mouth ? 'var(--accent-green)' : 'var(--text-muted)';
+            }
+            if (motorNeck) {
+                motorNeck.textContent = mouthRobotHardware.neck ? 'ON' : 'OFF';
+                motorNeck.style.color = mouthRobotHardware.neck ? 'var(--accent-green)' : 'var(--text-muted)';
+            }
+        }).catch(function () {});
+    }
+
+    function bindMouthRobot() {
+        const talkBtn = $('btnMouthRobotTalk');
+        if (talkBtn) talkBtn.addEventListener('click', function () {
+            speakText('Hello from the talking mouth robot. I sit on the front edge of the stage, and my mouth moves in sync while the AI talks.');
+        });
+        const danceBtn = $('btnMouthRobotDance');
+        if (danceBtn) danceBtn.addEventListener('click', function () {
+            const dancing = /dance/i.test(activePose);
+            setPose(dancing ? 'Stand' : 'Dance');
+        });
     }
 
     function setGait(name) {
@@ -574,16 +727,27 @@
         if (!text) return;
         const clean = String(text).replace(/[*_#`]/g, '').slice(0, 600);
         const url = '/api/tts/speak?text=' + encodeURIComponent(clean) + '&voice=' + encodeURIComponent(selectedVoice);
+        const estimateSeconds = Math.min(45, 1.0 + clean.length * 0.065);
+
         if (selectedSpeaker && selectedSpeaker !== 'browser') {
             fetch('/api/audio/play', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url: window.location.origin + url, speaker: selectedSpeaker, volume: 100 })
             }).catch(function () {});
+            startMouthRobotTalking(estimateSeconds);
             return;
         }
+
         const audio = new Audio(url);
-        audio.play().catch(function () {});
+        ensureSpeechAnalyser(audio);
+        audio.addEventListener('ended', stopMouthRobotTalking);
+        audio.addEventListener('error', stopMouthRobotTalking);
+        startMouthRobotTalking(estimateSeconds + 2);
+        audio.play().catch(function () {
+            // Keep the estimated mouth animation running even when the
+            // browser blocks autoplay or the audio device is unavailable.
+        });
     }
 
     function sendChat(text) {
@@ -969,12 +1133,16 @@
 
         bindUI();
         bindMotors();
+        bindMouthRobot();
         loadServos();
         loadStatus();
+        updateMouthRobotMode();
+        pollMouthRobot();
 
         // Refresh status occasionally
         setInterval(loadStatus, 10000);
         setInterval(loadAudioList, 30000);
+        setInterval(pollMouthRobot, 400);
 
         requestAnimationFrame(animate);
     }

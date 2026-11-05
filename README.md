@@ -49,6 +49,10 @@ L298 accessory control and one-click Python export.
   synthesis and music-synced dance poses.
 - **Sensors & accessories** — 4x HC-SR04 telemetry, obstacle avoidance and an
   L298N dual H-bridge for a mouth and pulsating-neck motor.
+- **Talking mouth robot** — a body-less animatronic mouth that sits on the front
+  edge of the stage. L298 channel 1 opens the jaw, L298 channel 2 raises and
+  lowers the neck. It flaps in sync with Gemini/TTS speech and the neck bobs
+  occasionally while idle, talking or dancing.
 - **Python export** — downloads a ready-to-run `biped_17dof_control.py` script
   for both PCA9685 boards, the L298N and the ultrasonic sensors.
 
@@ -89,7 +93,9 @@ Wiring details, GPIO pinouts and power/safety notes are available in the
 | POST | `/api/servo/set` | Set joint angles and body attitude |
 | POST | `/api/pose` | Apply a named pose |
 | POST | `/api/calibration` | Save servo trim offsets |
-| POST | `/api/motor/l298` | Toggle mouth / neck motors |
+| POST | `/api/motor/l298` | Manually toggle mouth / neck motors |
+| GET | `/api/animatronic/state` | Talking-mouth robot mode and L298 state |
+| POST | `/api/animatronic/mode` | Set `idle`, `talking` or `dancing` mouth mode |
 | POST | `/api/gemini/chat` | Gemini text + vision chat |
 | POST | `/api/gemini/voice` | Gemini voice chat |
 | POST | `/api/gemini/gesture` | Hand gesture detection |
@@ -109,6 +115,27 @@ curl -X POST http://127.0.0.1:7090/api/start  -d '{"robot":"biped"}' -H 'Content
 curl -X POST http://127.0.0.1:7090/api/stop   -d '{"robot":"biped"}' -H 'Content-Type: application/json'
 curl -X POST http://127.0.0.1:7090/api/restart -d '{"robot":"biped"}' -H 'Content-Type: application/json'
 ```
+
+## Talking Mouth Robot
+
+The body-less animatronic mouth is rendered at the front edge of the 3D stage.
+It has two L298N actuators:
+
+| L298N channel | GPIO pins | Behavior |
+|---------------|-----------|----------|
+| Channel 1 (mouth) | ENA 18, IN1 23, IN2 24 | Energized = jaw opens |
+| Channel 2 (neck) | ENB 19, IN3 25, IN4 8 | Energized = neck rises / falls |
+
+The server runs a small animator automatically:
+
+- **Talking** — channel 1 pulses so the mouth opens and closes with the AI
+  speech. Start/stop is triggered by Gemini chat, voice replies and TTS.
+- **Dancing** — mouth and neck pulse on the dance beat.
+- **Idle** — mouth stays closed and the neck gives an occasional up/down bob
+  while the robot waits for commands.
+
+The control panel includes live channel status, a speech-envelope meter, a
+**Test Talk** button and a **Dance** toggle.
 
 ## Notes
 

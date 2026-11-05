@@ -40,6 +40,16 @@ class Biped3DRenderer {
         this.currentBody = { height: 0, roll: 0, pitch: 0, yaw: 0 };
         this.mouthValue = 0;
 
+        // Animatronic talking-mouth robot (no body, front edge of the stage)
+        this.mouthRobotTalking = false;
+        this.mouthRobotDancing = false;
+        this.mouthRobotMouth = 0;
+        this.mouthRobotNeckPhase = 0;
+        this.mouthRobotNeckOffset = 0;
+        this.mouthRobotIdleTimer = 2.5;
+        this.mouthRobotIdleImpulse = 0;
+        this.speechLevel = 0;
+
         this.setupEnvironment();
         this.buildRobot();
 
@@ -151,6 +161,133 @@ class Biped3DRenderer {
         this.buildLeg('l');
         this.buildLeg('r');
         this.buildSensors();
+        this.buildMouthRobot();
+    }
+
+    buildMouthRobot() {
+        // A body-less animatronic mouth that sits on the front edge of the
+        // stage. L298 channel 1 opens the jaw, channel 2 lifts the neck.
+        this.mouthRobotGroup = new THREE.Group();
+        this.mouthRobotGroup.position.set(-310, 0, 585);
+        this.mouthRobotGroup.rotation.y = 0.24;
+        this.scene.add(this.mouthRobotGroup);
+
+        const riser = this.cylinder(80, 98, 22, 0x111827, 32);
+        riser.position.y = 11;
+        this.mouthRobotGroup.add(riser);
+
+        const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(86, 4, 10, 40),
+            new THREE.MeshBasicMaterial({ color: 0x00f0ff })
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = 23;
+        this.mouthRobotGroup.add(ring);
+
+        this.mouthNeckGroup = new THREE.Group();
+        this.mouthNeckGroup.position.y = 22;
+        this.mouthRobotGroup.add(this.mouthNeckGroup);
+
+        const neckBase = this.cylinder(30, 36, 20, 0x334155, 24);
+        neckBase.position.y = 10;
+        this.mouthNeckGroup.add(neckBase);
+
+        this.mouthNeckPiston = this.cylinder(17, 22, 54, 0x475569, 20);
+        this.mouthNeckPiston.position.y = 46;
+        this.mouthNeckGroup.add(this.mouthNeckPiston);
+
+        this.mouthHeadGroup = new THREE.Group();
+        this.mouthHeadGroup.position.y = 76;
+        this.mouthNeckGroup.add(this.mouthHeadGroup);
+
+        const skull = new THREE.Mesh(
+            new THREE.SphereGeometry(62, 24, 18),
+            new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.25 })
+        );
+        skull.scale.set(1.05, 0.92, 1.0);
+        skull.position.set(0, 22, -4);
+        skull.castShadow = true;
+        skull.receiveShadow = true;
+        this.mouthHeadGroup.add(skull);
+
+        const band = this.cylinder(60, 60, 10, 0x00f0ff, 28);
+        band.rotation.x = Math.PI / 2;
+        band.position.set(0, 22, 26);
+        this.mouthHeadGroup.add(band);
+
+        const cavity = this.box(102, 48, 62, 0x05070c, 0.2, 0.9);
+        cavity.position.set(0, -10, 22);
+        this.mouthHeadGroup.add(cavity);
+
+        const upperLip = this.box(118, 16, 28, 0x00f0ff, 0.5, 0.3);
+        upperLip.position.set(0, 18, 52);
+        this.mouthHeadGroup.add(upperLip);
+
+        const toothMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, metalness: 0.15, roughness: 0.5 });
+        for (let i = 0; i < 7; i++) {
+            const tooth = new THREE.Mesh(new THREE.BoxGeometry(11, 12, 10), toothMat);
+            tooth.position.set(-42 + i * 14, 5, 47);
+            tooth.castShadow = true;
+            this.mouthHeadGroup.add(tooth);
+        }
+
+        const eyeMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+        [-27, 27].forEach(x => {
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(8, 16, 16), eyeMat);
+            eye.position.set(x, 48, 44);
+            this.mouthHeadGroup.add(eye);
+        });
+
+        this.mouthRobotGlow = new THREE.Mesh(
+            new THREE.PlaneGeometry(88, 40),
+            new THREE.MeshBasicMaterial({ color: 0xec4899, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
+        );
+        this.mouthRobotGlow.position.set(0, -8, 48);
+        this.mouthHeadGroup.add(this.mouthRobotGlow);
+
+        // Hinged lower jaw
+        this.mouthJawGroup = new THREE.Group();
+        this.mouthJawGroup.position.set(0, -24, -8);
+        this.mouthHeadGroup.add(this.mouthJawGroup);
+
+        const jaw = this.box(114, 26, 78, 0x334155, 0.8, 0.3);
+        jaw.position.set(0, -10, 34);
+        this.mouthJawGroup.add(jaw);
+
+        const lowerLip = this.box(120, 14, 24, 0x00f0ff, 0.5, 0.3);
+        lowerLip.position.set(0, 3, 68);
+        this.mouthJawGroup.add(lowerLip);
+
+        const tongue = this.box(64, 12, 50, 0xe11d48, 0.3, 0.55);
+        tongue.position.set(0, 8, 32);
+        this.mouthJawGroup.add(tongue);
+
+        for (let i = 0; i < 7; i++) {
+            const tooth = new THREE.Mesh(new THREE.BoxGeometry(11, 12, 10), toothMat);
+            tooth.position.set(-42 + i * 14, 8, 58);
+            tooth.castShadow = true;
+            this.mouthJawGroup.add(tooth);
+        }
+
+        const chinGlow = new THREE.Mesh(
+            new THREE.BoxGeometry(56, 6, 8),
+            new THREE.MeshBasicMaterial({ color: 0x00f0ff })
+        );
+        chinGlow.position.set(0, -16, 74);
+        this.mouthJawGroup.add(chinGlow);
+    }
+
+    setAnimatronicState(state) {
+        if (!state) return;
+        if (state.talking !== undefined) this.mouthRobotTalking = !!state.talking;
+        if (state.dancing !== undefined) this.mouthRobotDancing = !!state.dancing;
+        if (state.mouthEnergized !== undefined) this.mouthEnergized = !!state.mouthEnergized;
+        if (state.neckEnergized !== undefined) this.neckPulsating = !!state.neckEnergized;
+    }
+
+    setSpeechLevel(level) {
+        const value = Number(level);
+        this.speechLevel = isNaN(value) ? 0 : Math.max(0, Math.min(1, value));
     }
 
     buildHead() {
@@ -403,6 +540,56 @@ class Biped3DRenderer {
         this.controls.update();
     }
 
+    animateMouthRobot(dt, t) {
+        if (!this.mouthHeadGroup) return;
+        const tSec = t / 1000;
+
+        // Mouth: opens when the L298 channel 1 is energized, and flaps with
+        // the speech envelope while the AI is talking. Dancing adds a beat.
+        let target = 0.02;
+        if (this.mouthEnergized && !this.mouthRobotTalking) target = Math.max(target, 0.62);
+        if (this.mouthRobotTalking) {
+            target = Math.max(target, 0.10 + this.speechLevel * 0.62);
+        }
+        if (this.mouthRobotDancing) {
+            const beat = Math.abs(Math.sin(tSec * Math.PI * 2.1));
+            target = Math.max(target, 0.08 + beat * 0.50);
+        }
+        this.mouthRobotMouth += (target - this.mouthRobotMouth) * Math.min(1, dt * 16);
+        this.mouthJawGroup.rotation.x = this.mouthRobotMouth * 0.80;
+
+        if (this.mouthRobotGlow) {
+            this.mouthRobotGlow.material.opacity = 0.12 + this.mouthRobotMouth * 0.70;
+        }
+
+        const sway = this.mouthRobotTalking ? 0.045 : 0.02;
+        this.mouthHeadGroup.rotation.z = Math.sin(tSec * 1.7) * sway;
+        this.mouthHeadGroup.rotation.x = Math.sin(tSec * 0.9) * 0.02;
+
+        // Neck: powered bob when the L298 channel 2 is energized, plus
+        // occasional life while idle, talking or dancing.
+        this.mouthRobotNeckPhase += dt * (this.mouthRobotDancing ? 8.0 : (this.mouthRobotTalking ? 4.2 : 1.7));
+        let neckLift = 0;
+        if (this.neckPulsating) {
+            neckLift = (Math.sin(this.mouthRobotNeckPhase) + 1) * 0.5 * 24;
+        } else if (this.mouthRobotDancing) {
+            neckLift = (Math.sin(this.mouthRobotNeckPhase) + 1) * 0.5 * 18;
+        } else if (this.mouthRobotTalking) {
+            neckLift = (Math.sin(this.mouthRobotNeckPhase) + 1) * 0.5 * 10;
+        } else {
+            this.mouthRobotIdleTimer -= dt;
+            if (this.mouthRobotIdleTimer <= 0) {
+                this.mouthRobotIdleTimer = 3.5 + Math.random() * 5.0;
+                this.mouthRobotIdleImpulse = 1;
+            }
+            this.mouthRobotIdleImpulse = Math.max(0, this.mouthRobotIdleImpulse - dt * 0.7);
+            neckLift = (Math.sin(this.mouthRobotNeckPhase) + 1) * 0.5 * this.mouthRobotIdleImpulse * 12;
+        }
+        this.mouthRobotNeckOffset += (neckLift - this.mouthRobotNeckOffset) * Math.min(1, dt * 8);
+        this.mouthNeckGroup.position.y = 22 + this.mouthRobotNeckOffset;
+        this.mouthNeckPiston.scale.y = 1 + this.mouthRobotNeckOffset / 180;
+    }
+
     animate() {
         requestAnimationFrame(this.animate);
         const dt = Math.min(0.05, this.clock.getDelta());
@@ -419,6 +606,8 @@ class Biped3DRenderer {
         } else {
             this.headPanGroup.position.y += (178 - this.headPanGroup.position.y) * Math.min(1, dt * 6);
         }
+
+        this.animateMouthRobot(dt, t);
 
         this.controls.update();
         this.renderer.render(this.scene, this.camera);

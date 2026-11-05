@@ -20,6 +20,7 @@ import base64
 import threading
 import time
 import random
+import math
 import urllib.parse
 import re
 import local_audio
@@ -288,7 +289,26 @@ camera_stream = CameraStream("usb")
 gemini_bridge = GeminiBipedBridge()
 
 motor_state = {"mouth_channel1": False, "neck_channel2": False}
+manual_motor_state = {"mouth": False, "neck": False}
 sensor_state = {"front": 85, "rear": 140, "left": 70, "right": 75}
+
+# ---------------------------------------------------------------------------
+# Animatronic talking-mouth robot (no body, front edge of the stage)
+#   L298 channel 1 -> mouth motor (energized = mouth opens)
+#   L298 channel 2 -> neck motor  (energized = neck rises/falls)
+# The animator drives the channels so the mouth flaps while the AI talks and
+# the neck bobs occasionally while idle, talking or dancing.
+# ---------------------------------------------------------------------------
+animatronic_lock = threading.Lock()
+animatronic_state = {
+    "mode": "idle",              # idle | talking | dancing
+    "mouth_channel1": False,
+    "neck_channel2": False,
+    "neck_direction": 1,
+    "mouth_open": False,
+    "neck_energized": False,
+    "updated": time.time(),
+}
 
 
 def update_simulated_sensors():
@@ -361,7 +381,7 @@ class HardwareBridge:
         except Exception:
             pass
 
-    def set_motors(self, mouth, neck):
+    def set_motors(self, mouth, neck, neck_dir=1):
         if self.gpio is None:
             return
         try:
@@ -372,8 +392,12 @@ class HardwareBridge:
             else:
                 self.pwm["mouth"].ChangeDutyCycle(0)
             if neck:
-                self.gpio.output(self.pins["IN3"], self.gpio.HIGH)
-                self.gpio.output(self.pins["IN4"], self.gpio.LOW)
+                if neck_dir >= 0:
+                    self.gpio.output(self.pins["IN3"], self.gpio.HIGH)
+                    self.gpio.output(self.pins["IN4"], self.gpio.LOW)
+                else:
+                    self.gpio.output(self.pins["IN3"], self.gpio.LOW)
+                    self.gpio.output(self.pins["IN4"], self.gpio.HIGH)
                 self.pwm["neck"].ChangeDutyCycle(80)
             else:
                 self.pwm["neck"].ChangeDutyCycle(0)
@@ -382,6 +406,109 @@ class HardwareBridge:
 
 
 hardware = HardwareBridge()
+_last_motor_output = (False, False, 1)
+
+
+def apply_motor_outputs(force=False):
+    """Combine manual L298 toggles with the animatronic pattern."""
+    global _last_motor_output
+    with animatronic_lock:
+        mouth = bool(manual_motor_state["mouth"] or animatronic_state["mouth_channel1"])
+        neck = bool(manual_motor_state["neck"] or animatronic_state["neck_channel2"])
+        neck_dir = animatronic_state["neck_direction"]
+        motor_state["mouth_channel1"] = mouth
+        motor_state["neck_channel2"] = neck
+        animatronic_state["mouth_open"] = mouth
+        animatronic_state["neck_energized"] = neck
+        animatronic_state["updated"] = time.time()
+    output = (mouth, neck, neck_dir)
+    if force or output != _last_motor_output:
+        _last_motor_output = output
+        hardware.set_motors(mouth, neck, neck_dir)
+
+
+class MouthRobotAnimator(threading.Thread):
+    """Drives the talking mouth robot's L298 channels.
+
+    talking  - rapid mouth flapping with occasional neck nods
+    dancing  - mouth/neck pulses locked to a dance beat
+    idle     - closed mouth with an occasional neck bob while waiting
+    """
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.started = time.time()
+        self.last_mouth_toggle = 0.0
+        self.mouth_phase_on = False
+        self.next_neck = self.started + random.uniform(2.5, 5.0)
+        self.neck_until = 0.0
+        self.neck_on_since = 0.0
+
+    def run(self):
+        while True:
+            now = time.time()
+            with animatronic_lock:
+                mode = animatronic_state["mode"]
+                mouth_auto = False
+                neck_auto = False
+
+                if mode == "talking":
+                    if now - self.last_mouth_toggle >= 0.13:
+                        self.last_mouth_toggle = now
+                        self.mouth_phase_on = not self.mouth_phase_on
+                    mouth_auto = self.mouth_phase_on
+                    if now >= self.next_neck:
+                        self.neck_until = now + random.uniform(0.20, 0.34)
+                        self.next_neck = now + random.uniform(1.2, 2.6)
+                        animatronic_state["neck_direction"] *= -1
+                    neck_auto = now < self.neck_until
+
+                elif mode == "dancing":
+                    beat = now - self.started
+                    mouth_auto = math.sin(beat * math.pi * 4.0) > 0.1
+                    if now >= self.next_neck:
+                        self.neck_until = now + 0.22
+                        self.next_neck = now + 0.5
+                        animatronic_state["neck_direction"] *= -1
+                    neck_auto = now < self.neck_until
+
+                else:  # idle - wait for commands with the occasional neck bob
+                    mouth_auto = False
+                    if now >= self.next_neck:
+                        self.neck_until = now + random.uniform(0.18, 0.40)
+                        self.next_neck = now + random.uniform(3.5, 8.0)
+                        animatronic_state["neck_direction"] *= -1
+                    neck_auto = now < self.neck_until
+
+                animatronic_state["mouth_channel1"] = mouth_auto
+                animatronic_state["neck_channel2"] = neck_auto
+
+                # A held neck motor must reverse periodically so the neck
+                # travels up and down instead of stalling at one limit.
+                if neck_auto or manual_motor_state["neck"]:
+                    if self.neck_on_since == 0.0:
+                        self.neck_on_since = now
+                    elif now - self.neck_on_since >= 0.8:
+                        animatronic_state["neck_direction"] *= -1
+                        self.neck_on_since = now
+                else:
+                    self.neck_on_since = 0.0
+
+            apply_motor_outputs()
+            time.sleep(0.03)
+
+
+def set_animatronic_mode(mode):
+    mode = mode if mode in ("idle", "talking", "dancing") else "idle"
+    with animatronic_lock:
+        animatronic_state["mode"] = mode
+        animatronic_state["updated"] = time.time()
+    apply_motor_outputs(force=True)
+    return mode
+
+
+animatronic_animator = MouthRobotAnimator()
+animatronic_animator.start()
 
 
 def apply_servo_state():
@@ -448,6 +575,16 @@ class BipedRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(sensor_state)
         elif self.path.startswith("/api/motor/state"):
             self.send_json(motor_state)
+        elif self.path.startswith("/api/animatronic/state"):
+            with animatronic_lock:
+                payload = dict(animatronic_state)
+                payload.update({
+                    "manual_mouth": manual_motor_state["mouth"],
+                    "manual_neck": manual_motor_state["neck"],
+                    "mouth_channel1": motor_state["mouth_channel1"],
+                    "neck_channel2": motor_state["neck_channel2"],
+                })
+            self.send_json(payload)
         elif self.path.startswith("/api/tts/speak"):
             self.handle_tts()
         elif self.path.startswith("/api/audio/outputs") or self.path.startswith("/api/audio/sinks"):
@@ -526,10 +663,26 @@ class BipedRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"success": True, "calibration": dict(calibration_trims)})
 
         elif self.path == "/api/motor/l298":
-            motor_state["mouth_channel1"] = data.get("mouth", False)
-            motor_state["neck_channel2"] = data.get("neck", False)
-            hardware.set_motors(motor_state["mouth_channel1"], motor_state["neck_channel2"])
-            self.send_json({"success": True, "state": motor_state})
+            with animatronic_lock:
+                manual_motor_state["mouth"] = bool(data.get("mouth", False))
+                manual_motor_state["neck"] = bool(data.get("neck", False))
+            apply_motor_outputs(force=True)
+            self.send_json({"success": True, "state": dict(motor_state)})
+
+        elif self.path == "/api/animatronic/mode":
+            mode = set_animatronic_mode(data.get("mode", "idle"))
+            with animatronic_lock:
+                payload = dict(animatronic_state)
+            payload["success"] = True
+            self.send_json(payload)
+
+        elif self.path == "/api/animatronic/mouth":
+            # Direct speech-envelope override: open/close the mouth motor now.
+            with animatronic_lock:
+                animatronic_state["mouth_channel1"] = bool(data.get("open", False))
+                animatronic_state["updated"] = time.time()
+            apply_motor_outputs()
+            self.send_json({"success": True, "mouth_open": animatronic_state["mouth_channel1"]})
 
         elif self.path == "/api/camera/select":
             source = data.get("source", "usb")
@@ -700,6 +853,7 @@ Optional accessories:
 """
 
 import time
+import random
 import board
 import busio
 import RPi.GPIO as GPIO
@@ -760,13 +914,46 @@ def set_mouth_energized(energized):
     else:
         pwm_mouth.ChangeDutyCycle(0)
 
-def set_neck_pulsating(pulsating):
-    if pulsating:
-        GPIO.output(L298_IN3, GPIO.HIGH)
-        GPIO.output(L298_IN4, GPIO.LOW)
+def set_neck_energized(energized, direction=1):
+    """L298 channel 2: energize the talking-mouth robot's neck motor."""
+    if energized:
+        if direction >= 0:
+            GPIO.output(L298_IN3, GPIO.HIGH)
+            GPIO.output(L298_IN4, GPIO.LOW)
+        else:
+            GPIO.output(L298_IN3, GPIO.LOW)
+            GPIO.output(L298_IN4, GPIO.HIGH)
         pwm_neck.ChangeDutyCycle(80)
     else:
         pwm_neck.ChangeDutyCycle(0)
+
+
+def set_neck_pulsating(pulsating):
+    set_neck_energized(pulsating)
+
+
+def animate_talking_mouth(duration=5.0, beat=0.13):
+    """Flap the mouth and bob the neck (demo of the stage-front mouth robot)."""
+    end = time.time() + duration
+    mouth_on = False
+    neck_dir = 1
+    last_toggle = 0.0
+    last_neck = time.time()
+    neck_until = 0.0
+    while time.time() < end:
+        now = time.time()
+        if now - last_toggle >= beat:
+            last_toggle = now
+            mouth_on = not mouth_on
+            set_mouth_energized(mouth_on)
+        if now >= last_neck:
+            neck_dir *= -1
+            neck_until = now + 0.25
+            last_neck = now + random.uniform(1.2, 2.4)
+        set_neck_energized(now < neck_until, neck_dir)
+        time.sleep(0.02)
+    set_mouth_energized(False)
+    set_neck_energized(False)
 
 def read_distance_cm(sensor_name):
     pins = SENSORS.get(sensor_name)

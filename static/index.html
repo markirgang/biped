@@ -263,6 +263,24 @@
 
             <div class="panel-section">
                 <div class="section-title">
+                    <span>👄 Talking Mouth Robot</span>
+                    <span id="mouthRobotModeBadge" style="font-size:0.7rem; color:var(--text-muted); font-weight:bold;">IDLE</span>
+                </div>
+                <div class="joint-row"><span>Stage position:</span><span style="color:var(--accent-cyan);">Front Edge</span></div>
+                <div class="joint-row"><span>L298 Ch 1 (Mouth):</span><span id="mouthRobotMouthStatus" style="color:var(--text-muted); font-weight:bold;">OFF</span></div>
+                <div class="joint-row"><span>L298 Ch 2 (Neck):</span><span id="mouthRobotNeckStatus" style="color:var(--text-muted); font-weight:bold;">OFF</span></div>
+                <div class="mouth-level">
+                    <div class="mouth-level-label"><span>Speech envelope</span><span id="mouthRobotLevelText">0%</span></div>
+                    <div class="mouth-level-bar"><div id="mouthRobotLevelFill"></div></div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:8px;">
+                    <button class="btn-preset" id="btnMouthRobotTalk">🗣️ Test Talk</button>
+                    <button class="btn-preset" id="btnMouthRobotDance">💃 Dance</button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">
                     <span>17-Servo Joint Telemetry</span>
                     <span style="font-size:0.7rem; color:var(--accent-cyan);" id="ikStatus">IK VALID</span>
                 </div>
@@ -642,6 +660,7 @@
                         <li>Import MP3 files into <code>static/audio/</code> and play them from the browser or local speaker.</li>
                         <li>Select a dance routine to sync the pose with the music.</li>
                         <li>Text-to-speech is available through <code>/api/tts/speak</code>.</li>
+                        <li>The talking mouth robot sits on the stage front edge: its jaw follows L298 channel 1 and its neck follows channel 2 in sync with AI speech.</li>
                         <li>Use <strong>Export Python Code</strong> to download a ready-to-run 17-servo script.</li>
                     </ul>
                 </div>
