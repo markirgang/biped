@@ -24,6 +24,7 @@ import math
 import urllib.parse
 import re
 import local_audio
+import ai_engine
 from gemini_bridge import GeminiBipedBridge
 
 try:
@@ -589,6 +590,15 @@ class BipedRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_tts()
         elif self.path.startswith("/api/audio/outputs") or self.path.startswith("/api/audio/sinks"):
             self.send_json({"outputs": local_audio.list_local_audio_outputs()})
+        elif self.path.startswith("/api/audio/inputs") or self.path.startswith("/api/audio/sources"):
+            self.send_json({"inputs": local_audio.list_local_audio_inputs()})
+        elif self.path.startswith("/api/audio/devices"):
+            self.send_json({
+                "inputs": local_audio.list_local_audio_inputs(),
+                "outputs": local_audio.list_local_audio_outputs(),
+            })
+        elif self.path.startswith("/api/models") or self.path.startswith("/api/ai/models"):
+            self.send_json(ai_engine.get_available_models())
         else:
             super().do_GET()
 
@@ -695,7 +705,7 @@ class BipedRequestHandler(http.server.SimpleHTTPRequestHandler):
             api_key = data.get("api_key") or os.environ.get("GEMINI_API_KEY") or DEFAULT_GEMINI_KEY
             include_vision = data.get("include_vision", True)
             image_bytes = self.capture_camera_bytes() if include_vision else None
-            self.send_json(gemini_bridge.generate_chat_response(api_key, user_text, image_bytes))
+            self.send_json(gemini_bridge.generate_chat_response(api_key, user_text, image_bytes, provider=data.get("provider", ""), model=data.get("model", ""), ollama_url=data.get("ollama_url", "")))
 
         elif self.path == "/api/gemini/voice":
             DEFAULT_GEMINI_KEY = base64.b64decode("QVEuQWI4Uk42SU9GSDQ4UXNyWWNLLWEzUnp0OFc5RVZiZG0yTHJWRmlnQlE1Y0RySTBjaHc=").decode("utf-8")
@@ -703,9 +713,15 @@ class BipedRequestHandler(http.server.SimpleHTTPRequestHandler):
             audio_b64 = data.get("audio_b64", "")
             mime_type = data.get("mime_type", "audio/webm")
             include_vision = data.get("include_vision", True)
-            audio_bytes = base64.b64decode(audio_b64) if audio_b64 else None
+            use_local_mic = bool(data.get("use_local_mic") or data.get("source") == "local")
+            mic_device = data.get("mic_device") or data.get("mic") or ""
+            if use_local_mic and not audio_b64:
+                audio_bytes = local_audio.record_local_audio(duration=float(data.get("duration", 3.5)), device=mic_device)
+                mime_type = "audio/wav"
+            else:
+                audio_bytes = base64.b64decode(audio_b64) if audio_b64 else None
             image_bytes = self.capture_camera_bytes() if include_vision else None
-            self.send_json(gemini_bridge.generate_voice_chat_response(api_key, audio_bytes, mime_type, image_bytes))
+            self.send_json(gemini_bridge.generate_voice_chat_response(api_key, audio_bytes, mime_type, image_bytes, provider=data.get("provider", ""), model=data.get("model", ""), ollama_url=data.get("ollama_url", "")))
 
         elif self.path == "/api/gemini/gesture":
             frame = self.capture_camera_frame()

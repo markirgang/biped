@@ -5,6 +5,7 @@ import json
 import os
 from google import genai
 from google.genai import types
+from ai_engine import call_ai
 
 class GeminiBipedBridge:
     def __init__(self):
@@ -90,7 +91,7 @@ class GeminiBipedBridge:
         except Exception as e:
             return "None", 0, frame
 
-    def generate_chat_response(self, api_key, user_text="", image_bytes=None):
+    def generate_chat_response(self, api_key, user_text="", image_bytes=None, provider="", model="", ollama_url=""):
         """
         Sends text prompt and optional webcam snapshot to Google Gemini AI API.
         Returns: { text: str, action: dict, gesture: str }
@@ -164,38 +165,9 @@ class GeminiBipedBridge:
             temperature=0.7
         )
 
-        try:
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=contents,
-                config=config
-            )
+        return call_ai(api_key=api_key, contents=contents, config=config, provider=provider, model=model, ollama_url=ollama_url)
 
-            action = None
-            text_response = response.text or ""
-
-            # Check if Gemini executed function calls
-            if response.function_calls:
-                call = response.function_calls[0]
-                action = {
-                    "name": call.name,
-                    "args": call.args
-                }
-                if not text_response:
-                    text_response = f"Executing command: {call.name}"
-
-            return {
-                "text": text_response,
-                "action": action
-            }
-
-        except Exception as e:
-            return {
-                "text": f"Gemini API Error: {str(e)}",
-                "action": None
-            }
-
-    def generate_voice_chat_response(self, api_key, audio_bytes, mime_type="audio/webm", image_bytes=None):
+    def generate_voice_chat_response(self, api_key, audio_bytes, mime_type="audio/webm", image_bytes=None, provider="", model="", ollama_url=""):
         """
         Sends recorded voice audio directly to Gemini 3.8 Flash.
         Gemini transcribes the speech, answers conversationally, and executes robot tools.
@@ -277,35 +249,18 @@ class GeminiBipedBridge:
             temperature=0.7
         )
 
-        try:
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=contents,
-                config=config
-            )
+        res = call_ai(api_key=api_key, contents=contents, config=config, provider=provider, model=model, ollama_url=ollama_url)
+        raw_text = res.get("text") or ""
+        user_transcription = ""
+        text_response = raw_text
+        if "TRANSCRIPTION:" in raw_text:
+            parts = raw_text.split("RESPONSE:", 1)
+            user_transcription = parts[0].replace("TRANSCRIPTION:", "").strip()
+            if len(parts) > 1:
+                text_response = parts[1].strip()
+        return {
+            "transcription": user_transcription,
+            "text": text_response,
+            "action": res.get("action")
+        }
 
-            action = None
-            raw_text = response.text or ""
-            user_transcription = ""
-            text_response = raw_text
-
-            if "TRANSCRIPTION:" in raw_text:
-                parts = raw_text.split("RESPONSE:", 1)
-                user_transcription = parts[0].replace("TRANSCRIPTION:", "").strip()
-                if len(parts) > 1:
-                    text_response = parts[1].strip()
-
-            if response.function_calls:
-                call = response.function_calls[0]
-                action = {"name": call.name, "args": call.args}
-                if not text_response:
-                    text_response = f"Executing command: {call.name}"
-
-            return {
-                "transcription": user_transcription,
-                "text": text_response,
-                "action": action
-            }
-
-        except Exception as e:
-            return {"text": f"Gemini Voice Processing Error: {str(e)}", "action": None}
