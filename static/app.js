@@ -835,7 +835,8 @@
             };
             mediaRecorder.onstop = function () {
                 const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-                if (blob.size > 0) sendVoice(blob);
+                if (blob.size >= 6000) sendVoice(blob);
+                else if ($('micStatusText')) $('micStatusText').textContent = 'Status: Too short to process. Click to speak.';
             };
             mediaRecorder.start();
             micRecording = true;
